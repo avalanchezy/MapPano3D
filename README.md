@@ -25,6 +25,16 @@ neural architecture; see [the backbone interface](docs/backbones.md).
 - **Reproducible evaluation:** follow the complete **VGGT + nuScenes-mini**
   workflow across all ten scenes, from images to independent LiDAR metrics.
 
+## Interactive Demo
+
+**[Open the interactive reconstruction](https://avalanchezy.github.io/MapPano3D/demo/)**
+
+Explore the colored point cloud, play the camera walkthrough, and follow the
+synchronized panoramic imagery and map. Switch to Overview to orbit and zoom
+around the reconstructed area.
+
+[![MapPano3D interactive demo](docs/demo/preview.png)](https://avalanchezy.github.io/MapPano3D/demo/)
+
 ## Getting Started
 
 Use Python 3.10 or newer. Install the geometry and evaluation dependencies:
@@ -76,8 +86,9 @@ for alignment, filtering, metrics, and development settings.
 For panoramic inputs, use your own 360-degree recordings with map support
 and camera anchors; see the [input specification](docs/custom_360_inputs.md).
 MovieMap route, pose, calibration, and frame-association metadata remain
-private. Paper figures and demonstration videos can be shared as visual
-results. Obtain nuScenes and pretrained weights from their original providers.
+private. The interactive demo includes curated visualization assets and a
+relative playback path. Obtain nuScenes and pretrained weights from their
+original providers.
 
 ## Citation
 
