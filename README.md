@@ -13,11 +13,16 @@ applied to the **full static scene**, not only to road points.
 
 ![MapPano3D framework](assets/pipeline.png)
 
-The release provides a user-supplied panoramic geometry interface and
-multi-camera perspective reconstruction with VGGT. Other
-feed-forward predictors can be connected through their point maps, camera
-poses, pixel correspondences, and coordinate conventions; see
-[the backbone interface](docs/backbones.md).
+The code uses a shared geometry contract with **VGGT, Pi3X, and PanoVGGT
+integration interfaces**. Registration consumes point maps, camera poses,
+semantic associations, and coordinate conventions rather than a specific
+neural architecture; see [the backbone interface](docs/backbones.md).
+
+The complete reproduction workflow is **VGGT + nuScenes-mini**, including
+all ten scenes and independent LiDAR evaluation. Pi3X and PanoVGGT expose
+extension hooks and input specifications, not additional turnkey tutorials.
+The paper's backbone experiments use VGGT and PanoVGGT; the Pi3X hook is an
+integration interface, not a reported MapPano3D-Pi3X experiment.
 
 ## Getting Started
 
@@ -34,15 +39,18 @@ pretrained weights, and a suitable GPU. Mask2Former inference requires its
 Detectron2 environment. Install those dependencies using their upstream
 instructions; geometry post-processing can run on CPU.
 
-**[Reproduction instructions](docs/reproduction.md)** cover the matched
-six-camera nuScenes comparison, component ablations, and anchor perturbations.
-For panoramic footage, record your own 360-degree video and follow the
-**[custom-video input interface](docs/custom_360_inputs.md)**.
+**[VGGT + nuScenes reproduction](docs/reproduction.md)** is the single
+end-to-end guide: data preparation, semantic masks, VGGT predictions,
+map refinement, full-static fusion, and all-scene geometry evaluation.
+For other predictors or your own 360-degree recordings, use the
+[backbone contract](docs/backbones.md) and
+[custom input specification](docs/custom_360_inputs.md).
 
 ## Code Layout
 
 | Directory | Contents |
 | --- | --- |
+| `mappano3d/` | Shared geometry contract and VGGT/Pi3X/PanoVGGT integration hooks |
 | `tools/` | Semantic masks, road-mask extraction, generic BEV refinement, full-cloud export, map evaluation |
 | `rebuttal_exp/scripts/` | VGGT adapter, nuScenes LiDAR evaluation and anchor perturbations |
 | `rebuttal_exp/configs/` | Experiment configurations, including the 40-image/20-overlap VGGT setting |
@@ -66,9 +74,12 @@ Model weights, reconstruction caches, and review material are also excluded.
   LiDAR accuracy, completeness, Chamfer-L1, precision, recall, and F1.
 
 LiDAR is an evaluation reference, not an input to local BEV optimization.
-The nuScenes comparison shares camera-pose anchors and local VGGT predictions
-between VGGT-Long and MapPano3D. Map-fit and LiDAR metrics measure different
-properties and are reported separately.
+The nuScenes comparison uses one shared upright alignment from the
+pre-refinement VGGT camera trajectory to the dataset's ground-truth camera
+trajectory. Both methods reuse the same predictions and static filtering;
+there is no method-specific global re-fitting. Mini evaluation informed the
+development of acceptance settings. Map-fit and LiDAR metrics measure
+different properties and are reported separately.
 
 ## Citation
 

@@ -1,39 +1,59 @@
-# Feed-Forward Backbone Interface
+# Feed-Forward Backbone Interfaces
 
-MapPano3D's registration stage consumes geometry, not a particular neural
-architecture. A local predictor supplies:
+MapPano3D separates neural geometry prediction from map registration. The
+common API in `mappano3d/backbones.py` reserves three named entry points:
 
-1. Colored 3D points or a point map for each image, with optional confidence.
-2. Camera-to-world poses in the same local frame as those points.
-3. The association between image pixels and points, or intrinsics and poses
-   sufficient for semantic reprojection.
-4. Frame identifiers linking predictions to camera anchors and semantic masks.
+| Entry point | Role | Released workflow |
+| --- | --- | --- |
+| `VGGTAdapter` | Perspective point-map integration hook | Complete VGGT-Long + nuScenes guide |
+| `Pi3XAdapter` | Pi3X output-conversion hook | Interface only |
+| `PanoVGGTAdapter` | Equirectangular point-map integration hook | Interface only |
 
-An adapter resolves the predictor's scale and coordinate convention, selects
-road evidence and static scene points, and initializes the chunk. The same
-bounded upright BEV registration then operates in map coordinates. Accepted
-transforms propagate to the complete static cloud.
+Each hook takes a `predict_and_convert(images, frame_ids)` callback that
+invokes an upstream frozen model or reads cached outputs, then returns
+`GeometryChunk`. The callback owns model-specific tensor keys, camera
+conversion, image resizing, and conversion to NumPy. No training or learned
+registration component is introduced. Different upstream output formats
+are normalized explicitly rather than inferred from the model name.
 
-## Released Interfaces
+## Shared Data Contract
 
-- **Panoramic geometry:** use your own 360-degree video with PanoVGGT or another
-  compatible predictor, then provide point clouds, camera anchors and map
-  support through the [custom-video interface](custom_360_inputs.md).
-  The PanoVGGT export patch is included; private dataset loaders are not.
-- **VGGT:** `run_nuscenes_vggt_backbone_mappano3d.py` consumes numbered
-  VGGT-Long chunk PLY files, `camera_poses.txt`, and `intrinsic.txt`.
-  `run_nuscenes_global_vggt_refine.py` shares global placement with VGGT-Long
-  and applies map-supported local updates to the same predictions.
+| `GeometryChunk` field | Convention |
+| --- | --- |
+| `frame_ids` | Ordered tuple of frame identifiers |
+| `point_maps` | `(N, H, W, 3)` points in one shared local world frame |
+| `camera_to_world` | `(N, 4, 4)` poses in that same frame |
+| `vertical_axis` | `1` for Y-up/XZ maps; `2` for Z-up/XY maps |
+| `colors` | Optional `(N, H, W, 3)` RGB in `[0, 1]` |
+| `valid_mask` | Optional `(N, H, W)` boolean geometry/confidence selection |
+| `confidence` | Optional `(N, H, W)` scores; the converter chooses thresholds |
 
-The generic panoramic interface uses X/Z horizontally; the nuScenes adapter uses X/Y
-horizontally and Z vertically. Resolve this convention before alignment.
-Positive-scale upright updates preserve height in the nuScenes adapter.
+Points use the common chunk frame, not separate per-camera frames. Invert
+world-to-camera matrices when needed. Point maps and semantic labels must
+refer to the same resized/cropped pixel grid. Panorama associations follow
+the equirectangular grid. `vertical_axis` describes the adapter convention;
+it does not infer or rotate the ground plane.
 
-Other predictors, including pi3, can expose the same geometry interface. This
-release provides the interfaces above; adding another predictor
-requires implementing its output conversion, not retraining MapPano3D.
+`chunk.semantic_points(labels)` returns road evidence and the complete static
+scene as two `PointCloud` objects. Defaults use Cityscapes road ID 0 and
+exclude sky ID 10 and dynamic IDs 11-18; other label systems supply `road_id`
+and `excluded_ids`. Buildings and vegetation remain in the static cloud.
+Invalid/nonfinite points are omitted from both sets.
 
-## Upstream Snapshots and Export Patches
+The map adapter aligns geometry to camera anchors and map coordinates, then
+passes road evidence and static geometry separately to the refiner. Road
+extraction is not full-scene reconstruction.
+
+## Existing VGGT-Long Export Adapter
+
+The complete guide uses the existing PLY export path rather than requiring
+dense point maps in memory. `run_nuscenes_vggt_backbone_mappano3d.py` reads
+numbered chunk PLY files, `camera_poses.txt`, and `intrinsic.txt`, and selects
+semantics by reprojection. `run_nuscenes_global_vggt_refine.py` fixes one
+shared global placement and refines the same chunk geometry locally.
+The fixed-scale VGGT update changes X/Y and preserves Z.
+
+## Upstream Export Patches
 
 | Repository | Tested base commit | Patch |
 | --- | --- | --- |
@@ -41,15 +61,11 @@ requires implementing its output conversion, not retraining MapPano3D.
 | VGGT-Long | `c160869d1d99c96bb227f414afb3bc68c29c9a76` | `patches/vggt-long-export.patch` |
 | PanoVGGT-Long | `0dfabf91ef4d6853aa4cad0aaf5011ba09a2e29b` | `patches/panovggt-long-export.patch` |
 
-Use a separate clone for each backbone and follow its installation and weight
-download instructions. For example, from the MapPano3D root:
+The patches preserve export information without changing neural weights.
+Pi3X output conversion is supplied by the integrator; no Pi3X implementation
+or weights are bundled. The paper evaluates MapPano3D with VGGT and PanoVGGT,
+not with the Pi3X extension hook.
 
-```bash
-git clone https://github.com/DengKaiCQ/VGGT-Long.git VGGT-Long
-git -C VGGT-Long checkout c160869d1d99c96bb227f414afb3bc68c29c9a76
-git -C VGGT-Long apply ../patches/vggt-long-export.patch
-```
-
-The VGGT patch retains per-chunk export information used by the shared-input
-comparison. The PanoVGGT patch adds masked inference/export options used by
-the panoramic adapter. These patches do not train or fine-tune the models.
+The only end-to-end instructions are [VGGT + nuScenes](reproduction.md).
+The [custom-data specification](custom_360_inputs.md) defines panoramic
+map/anchor inputs without publishing MovieMap metadata.

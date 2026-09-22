@@ -1,123 +1,174 @@
-# Reproduction
+# VGGT + nuScenes: Complete Workflow
 
-Run commands from the MapPano3D repository root unless stated otherwise.
-Paths below are examples for your local data and upstream installations.
-The geometry/evaluation requirements are separate from the upstream CUDA
-environments used for model inference.
+This is the release's single end-to-end guide. Commands use Bash (Linux or
+WSL), from the MapPano3D root unless stated otherwise. Keep separate upstream
+environments for VGGT-Long and Mask2Former/Detectron2; the geometry/evaluation
+environment uses `requirements.txt`. Switch to the named environment before
+each inference step, retaining the shell variables below.
 
-## nuScenes: Six-Camera Geometry
+## 1. Dependencies and Data
 
-Obtain nuScenes-mini and the expansion maps from the dataset provider. The
-data root must contain `v1.0-mini/`, `samples/`, and `maps/`, including expansion
-JSON maps with intersection polygons. All ten mini scenes are used:
-0061, 0103, 0553, 0655, 0757, 0796, 0916, 1077, 1094, 1100.
-
-### Inputs and Semantics
-
-The `sweep_fov60` directory name is retained from the experiment scripts. On
-nuScenes this exports the **six native camera images** in timestamp order;
-it does not stitch or recrop them into panoramas.
+Install this repository's requirements and tests as described in the README.
+Clone the upstream geometry implementation and apply the export patch:
 
 ```bash
 export ROOT="$PWD"
+git clone https://github.com/DengKaiCQ/VGGT-Long.git VGGT-Long
+git -C VGGT-Long checkout c160869d1d99c96bb227f414afb3bc68c29c9a76
+git -C VGGT-Long apply ../patches/vggt-long-export.patch
+```
+
+Follow that pinned repository's installation and checkpoint instructions.
+Its requirements omit two unconditional loop/export imports; install them
+in the VGGT-Long environment and check imports before inference:
+
+```bash
+python -m pip install pypose trimesh
+(cd "$ROOT/VGGT-Long" && python -c "import vggt_long")
+```
+
+For the released configuration, place VGGT `model.pt`, SALAD
+`dino_salad.ckpt`, and `dinov2_vitb14_pretrain.pth` under `VGGT-Long/weights/`.
+The configuration uses SALAD loop closure, not DBoW. Install Mask2Former
+under `Mask2Former/` using its upstream environment and Cityscapes R50
+semantic checkpoint; `run_mask2former.py --help` lists config/weight options.
+
+Obtain nuScenes-mini and expansion maps from the dataset provider. The root
+contains `v1.0-mini/`, `samples/`, and `maps/`, including expansion JSON maps
+with intersection polygons. No MovieMap assets are needed.
+
+```bash
 export DATA="$ROOT/data/nuscenes"
 export INPUT="$ROOT/outputs/nuscenes/inputs"
 export SEMANTICS="$ROOT/outputs/nuscenes/semantics"
 export RAW="$ROOT/outputs/nuscenes/raw"
 export ANCHORS="$ROOT/outputs/nuscenes/anchors"
 export REFINED="$ROOT/outputs/nuscenes/refined"
-export SCENE=scene-0796
+export REPORTS="$ROOT/outputs/nuscenes/reports"
+SCENES=(scene-0061 scene-0103 scene-0553 scene-0655 scene-0757
+        scene-0796 scene-0916 scene-1077 scene-1094 scene-1100)
+```
 
+## 2. Six-Camera Inputs and Semantics
+
+The historical `sweep_fov60` directory name means **six native camera images**
+in this nuScenes adapter: it neither stitches nor recrops them into panoramas.
+
+```bash
 python tools/build_nuscenes_long_sequences.py \
   --dataroot "$DATA" --version-dir "$DATA/v1.0-mini" \
-  --out-root "$INPUT" --view-mode sweep_fov60 --copy-mode copy
+  --out-root "$INPUT" --view-mode sweep_fov60 --copy-mode copy \
+  --scene "${SCENES[@]}"
 
-# Run in the Mask2Former/Detectron2 environment.
+# In the Mask2Former/Detectron2 environment:
 python tools/run_mask2former.py \
   --mask2former-dir "$ROOT/Mask2Former" \
-  --input-root "$INPUT/sweep_fov60" --routes "$SCENE" \
+  --input-root "$INPUT/sweep_fov60" --routes "${SCENES[@]}" \
   --output-root "$SEMANTICS"
 ```
 
-Use the default Cityscapes R50 checkpoint/config or provide `--config` and
-`--weights`. Masks are saved as `semantic_class_id/SCENE/IMAGE_STEM_sem.png`,
-with class definitions in `classes.json`. Run segmentation for every scene.
+Masks are `semantic_class_id/SCENE/IMAGE_STEM_sem.png`, with `classes.json`.
+Road ID 0 supplies alignment evidence; sky ID 10 and dynamic IDs 11-18 are
+excluded from static fusion. The complete static cloud retains other classes.
 
-### Shared VGGT Predictions
+## 3. Shared VGGT Predictions
 
-Install VGGT-Long and apply the [export patch](backbones.md). Place upstream
-weights in its `weights/` directory. The released YAML uses paths relative to
-that repository; run inference there:
+In the VGGT-Long environment:
 
 ```bash
 cd "$ROOT/VGGT-Long"
-python vggt_long.py --image_dir "$INPUT/sweep_fov60/$SCENE/images" \
-  --config "$ROOT/rebuttal_exp/configs/vggt_long_nuscenes_c40_o20.yaml" \
-  --save_dir "$RAW/$SCENE/VGGT"
+for SCENE in "${SCENES[@]}"; do
+  python vggt_long.py --image_dir "$INPUT/sweep_fov60/$SCENE/images" \
+    --config "$ROOT/rebuttal_exp/configs/vggt_long_nuscenes_c40_o20.yaml" \
+    --save_dir "$RAW/$SCENE/VGGT" || break
+done
 cd "$ROOT"
 ```
 
-The configuration uses **40 total camera images per chunk**, **20-image
-overlap**, and loop closure. Both methods reuse these predictions and static
-semantic filtering.
+Each chunk contains **40 total camera images**, with **20-image overlap**,
+not 40 six-camera timestamps. Both methods reuse these predictions, exported
+chunk clouds, camera poses, and semantic filtering.
 
-### MapPano3D Registration and Full-Scene Fusion
+## 4. Map Registration and Full-Scene Fusion
+
+In the geometry/evaluation environment:
 
 ```bash
-python rebuttal_exp/scripts/run_nuscenes_vggt_backbone_mappano3d.py \
-  --scene "$SCENE" --vggt-dir "$RAW/$SCENE/VGGT" \
-  --input-dir "$INPUT/sweep_fov60/$SCENE" --semantic-root "$SEMANTICS" \
-  --dataroot "$DATA" --version-dir "$DATA/v1.0-mini" \
-  --output-dir "$ANCHORS/$SCENE" --chunk-size 40 --overlap 20
+for SCENE in "${SCENES[@]}"; do
+  python rebuttal_exp/scripts/run_nuscenes_vggt_backbone_mappano3d.py \
+    --scene "$SCENE" --vggt-dir "$RAW/$SCENE/VGGT" \
+    --input-dir "$INPUT/sweep_fov60/$SCENE" --semantic-root "$SEMANTICS" \
+    --dataroot "$DATA" --version-dir "$DATA/v1.0-mini" \
+    --output-dir "$ANCHORS/$SCENE" --chunk-size 40 --overlap 20 || break
+done
 
 python rebuttal_exp/scripts/run_nuscenes_global_vggt_refine.py \
-  --scene "$SCENE" --chunk-anchor-root "$ANCHORS" --vggt-root "$RAW" \
+  --scene "${SCENES[@]}" --chunk-anchor-root "$ANCHORS" --vggt-root "$RAW" \
   --input-root "$INPUT/sweep_fov60" --dataroot "$DATA" \
   --version-dir "$DATA/v1.0-mini" --output-root "$REFINED" \
   --chunk-size 40 --overlap 20 --road-evidence semantic
 ```
 
-The first command prepares semantic chunk caches. The second fixes a shared
-global camera alignment for the actual VGGT-Long comparison and applies local
-map refinement. Use the second command's output for the matched comparison:
+The first command prepares semantic chunk caches. The global refiner removes
+their temporary per-chunk placement and applies one shared upright similarity
+from the pre-refinement VGGT trajectory to the GT camera trajectory. This
+alignment is fixed for both methods. Map intersections select supported
+updates; no LiDAR or method-specific global re-fitting enters refinement.
+The resulting files used for the matched comparison are:
 
-- `vggt_long_registered_static_cloud.ply`: the registered VGGT-Long baseline.
+- `vggt_long_registered_static_cloud.ply`: shared-placement VGGT-Long baseline.
 - `registered_refined_cloud.ply`: MapPano3D full static reconstruction.
-- `metrics.json`: per-chunk map metrics and accepted-update decisions.
+- `metrics.json`: per-chunk map metrics and acceptance decisions.
 
-### Independent LiDAR Evaluation
+The bounded VGGT update fixes scale to one and preserves initialized height.
+Both branches have the same static inputs and voxel settings; no extra
+method-specific one-sided point deletion is used in this matched comparison.
+
+## 5. LiDAR Evaluation and Ten-Scene Summary
 
 ```bash
-python rebuttal_exp/scripts/evaluate_nuscenes_lidar.py \
-  --dataroot "$DATA" --version v1.0-mini --scene "$SCENE" \
-  --pose-init-cloud "$REFINED/$SCENE/vggt_long_registered_static_cloud.ply" \
-  --refined-cloud "$REFINED/$SCENE/registered_refined_cloud.ply" \
-  --out-dir "$ROOT/outputs/nuscenes/lidar/$SCENE"
+python rebuttal_exp/scripts/build_nuscenes_vggt_backbone_manifest.py \
+  --run-root "$REFINED" --input-root "$INPUT/sweep_fov60" \
+  --scene "${SCENES[@]}" --min-target-path-m 0 \
+  --output "$REPORTS/comparison_manifest.csv"
+
+python rebuttal_exp/scripts/evaluate_nuscenes_method_comparison.py \
+  --manifest "$REPORTS/comparison_manifest.csv" --dataroot "$DATA" \
+  --version v1.0-mini --min-target-path-m 0 \
+  --output-dir "$REPORTS/lidar"
+
+python rebuttal_exp/scripts/summarize_nuscenes_vggt_backbone_results.py \
+  --metrics "$REPORTS/lidar/per_scene_metrics.csv" \
+  --manifest "$REPORTS/comparison_manifest.csv" --run-root "$REFINED" \
+  --version-dir "$DATA/v1.0-mini" \
+  --output-csv "$REPORTS/all10_detailed.csv" \
+  --output-json "$REPORTS/all10_summary.json"
 ```
 
+`--min-target-path-m 0` retains the two near-stationary scenes. The main
+comparison uses `groups.all10` in the summary, not the moving-only diagnostic.
+Check that it contains all ten scene IDs and that the per-scene CSV contains
+both methods and both subsets for each scene (40 rows).
+
 The evaluator uses a 35-m corridor, heights [-2.5, 6] m, 0.25-m voxels, and
-dynamic-box filtering. A 0.35-m ground separation yields the non-ground
-subset. Accuracy and completeness are directed nearest-neighbor distances;
-Chamfer-L1 is their **sum**. Precision/recall/F1 use the stated threshold
-(1 m in the main table). Average scenes equally, retaining all ten, including
-identity updates. Do not fit a separate transform to LiDAR.
+reference dynamic-box removal. Relative height above 0.35 m defines the
+non-ground subset. Accuracy and completeness are directed nearest-neighbor
+distances; Chamfer-L1 is their **sum**. Precision/recall/F1 are reported at
+0.5 and 1 m; the paper uses 1 m. Scene metrics are equally weighted, including
+identity updates. No cloud is independently fitted to LiDAR.
 
-## User-Created 360-Degree Video
+Mini LiDAR evaluation informed acceptance-setting development. LiDAR is not
+an input to the reconstruction, optimization, or per-update acceptance rule.
+Map-fit metrics and LiDAR geometry metrics remain separate outputs.
 
-See [the custom-video interface](custom_360_inputs.md). Supply your own video,
-map support, and camera anchors. No MovieMap metadata is included.
+## 6. Matched Road-Evidence Ablation
 
-## Component and Robustness Studies
+Reuse steps 1-3 and the same chunk caches. Run the global refiner with
+`--road-evidence ground_proxy` and a different `--output-root`. Its evaluation
+still uses the same semantic-road sample; only optimization evidence changes.
+Compare initialization, ground-BEV, and road-BEV within this fixed protocol.
 
-- For the nuScenes semantic-versus-ground ablation, keep predictions, anchors,
-  and evaluation samples fixed and change `--road-evidence semantic` to
-  `--road-evidence ground_proxy` in the global refiner. Compare against the same
-  initialization cloud; semantic evidence remains the evaluation signal.
-- `run_nuscenes_perturbation_study.py` runs the PanoVGGT anchor-stress study;
-  `run_nuscenes_vggt_backbone_perturbations.py` provides the separate VGGT
-  counterpart. Explicit scene and perturbation selections keep them distinct.
-
-These scripts recompute experiments from locally available predictions and
-data. No experimental results are generated by the unit tests. The tests
-exercise upright alignment, shared-input chunk indexing, semantic projection
-helpers, crossing support, and LiDAR evaluation geometry.
+Pi3X and PanoVGGT are documented in the [interface reference](backbones.md),
+not as additional end-to-end workflows. Unit tests exercise contracts and
+geometry helpers; they do not run pretrained networks or reproduce experimental
+scores. Full reproduction requires the actual nuScenes data, weights, and GPU.
