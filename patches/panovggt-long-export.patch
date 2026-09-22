@@ -1,0 +1,146 @@
+diff --git a/panovggt_long.py b/panovggt_long.py
+index 804ace1..3ea06e4 100644
+--- a/panovggt_long.py
++++ b/panovggt_long.py
+@@ -64,6 +64,20 @@ def remove_duplicates(data_list):
+     return result
+ 
+ 
++def load_precomputed_loop_pairs(loop_file):
++    loop_pairs = []
++    with open(loop_file, "r", encoding="utf-8") as f:
++        for line in f:
++            line = line.strip()
++            if not line or line.startswith("#"):
++                continue
++            parts = [p.strip() for p in line.split(",")]
++            if len(parts) < 2:
++                continue
++            loop_pairs.append((int(parts[0]), int(parts[1])))
++    return loop_pairs
++
++
+ def copy_file(src_path, dst_dir):
+     try:
+         os.makedirs(dst_dir, exist_ok=True)
+@@ -242,6 +256,8 @@ class PanoVGGT_Long:
+         self.all_camera_poses = []
+         self.all_camera_intrinsics = []
+         self.delete_temp_files = self.config["Model"]["delete_temp_files"]
++        self.resume_existing = bool(self.config["Model"].get("resume_existing", False))
++        self.max_loop_pairs = self.config["Model"].get("max_loop_pairs", None)
+ 
+         self.model = PanoVGGTAdapter(self.config, self.repo_root)
+         self.chunk_indices = None
+@@ -251,11 +267,12 @@ class PanoVGGT_Long:
+         self.loop_sim3_list = []
+         self.loop_predict_list = []
+         self.loop_enable = self.config["Model"]["loop_enable"]
++        self.precomputed_loop_file = self.config.get("Loop", {}).get("precomputed_loop_file", None)
+ 
+         if self.loop_enable:
+             if self.useDBoW:
+                 self.retrieval = RetrievalDBOW(config=self.config)
+-            else:
++            elif self.precomputed_loop_file is None:
+                 loop_info_save_path = os.path.join(save_dir, "loop_closures.txt")
+                 self.loop_detector = LoopDetector(
+                     image_dir=image_dir,
+@@ -265,6 +282,13 @@ class PanoVGGT_Long:
+         print("init done.")
+ 
+     def get_loop_pairs(self):
++        if self.precomputed_loop_file is not None:
++            if not os.path.exists(self.precomputed_loop_file):
++                raise FileNotFoundError(f"Precomputed loop file not found: {self.precomputed_loop_file}")
++            self.loop_list = load_precomputed_loop_pairs(self.precomputed_loop_file)
++            print(f"Loaded {len(self.loop_list)} precomputed loop pairs from {self.precomputed_loop_file}")
++            return
++
+         if self.useDBoW:
+             for frame_id, img_path in tqdm(enumerate(self.img_list)):
+                 image_ori = np.array(Image.open(img_path))
+@@ -301,9 +325,6 @@ class PanoVGGT_Long:
+             start_idx, end_idx = range_2
+             chunk_image_paths += self.img_list[start_idx:end_idx]
+ 
+-        predictions = self.model.infer_chunk(chunk_image_paths)
+-        predictions = self._to_numpy_for_save(predictions)
+-
+         if is_loop:
+             save_dir = self.result_loop_dir
+             filename = f"loop_{range_1[0]}_{range_1[1]}_{range_2[0]}_{range_2[1]}.npy"
+@@ -314,6 +335,18 @@ class PanoVGGT_Long:
+             filename = f"chunk_{chunk_idx}.npy"
+ 
+         save_path = os.path.join(save_dir, filename)
++        if self.resume_existing and os.path.exists(save_path):
++            predictions = np.load(save_path, allow_pickle=True).item()
++            if not is_loop and range_2 is None:
++                chunk_range = self.chunk_indices[chunk_idx]
++                extrinsics = predictions.get("extrinsic", predictions.get("camera_poses", None))
++                intrinsics = predictions.get("intrinsic", None)
++                self.all_camera_poses.append((chunk_range, extrinsics))
++                self.all_camera_intrinsics.append((chunk_range, intrinsics))
++            return predictions if is_loop or range_2 is not None else None
++
++        predictions = self.model.infer_chunk(chunk_image_paths)
++        predictions = self._to_numpy_for_save(predictions)
+ 
+         if not is_loop and range_2 is None:
+             chunk_range = self.chunk_indices[chunk_idx]
+@@ -385,6 +418,9 @@ class PanoVGGT_Long:
+                 half_window=int(self.config["Model"]["loop_chunk_size"] / 2),
+             )
+             loop_results = remove_duplicates(loop_results)
++            if self.max_loop_pairs is not None and int(self.max_loop_pairs) > 0:
++                loop_results = loop_results[: int(self.max_loop_pairs)]
++                print(f"Using first {len(loop_results)} loop pairs after max_loop_pairs cap.")
+             print(loop_results)
+             for item in loop_results:
+                 single_chunk_predictions = self.process_single_chunk(item[1], range_2=item[3], is_loop=True)
+@@ -558,8 +594,12 @@ class PanoVGGT_Long:
+                 self.retrieval.close()
+                 gc.collect()
+             else:
+-                del self.loop_detector
++                if hasattr(self, "loop_detector"):
++                    del self.loop_detector
++                    gc.collect()
+         torch.cuda.empty_cache()
++        if torch.cuda.is_available():
++            torch.cuda.ipc_collect()
+         print("Loading model...")
+         self.model.load()
+         self.process_long_sequence()
+@@ -667,16 +707,28 @@ if __name__ == "__main__":
+         default="./exps",
+         help="experiment root path",
+     )
++    parser.add_argument(
++        "--save_dir",
++        type=str,
++        default=None,
++        help="existing or explicit experiment directory",
++    )
+     args = parser.parse_args()
+ 
+     repo_root = Path(__file__).resolve().parent
+     config = load_config(args.config)
+-    current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+-    save_dir = os.path.join(args.exp_folder_name, args.image_dir.replace("/", "_").replace("\\", "_"), current_datetime)
++    if args.save_dir is not None:
++        save_dir = args.save_dir
++    else:
++        current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
++        save_dir = os.path.join(args.exp_folder_name, args.image_dir.replace("/", "_").replace("\\", "_"), current_datetime)
+     if not os.path.exists(save_dir):
+         os.makedirs(save_dir)
+         print(f"The exp will be saved under dir: {save_dir}")
+         copy_file(args.config, save_dir)
++    elif args.save_dir is not None:
++        print(f"The exp will resume under dir: {save_dir}")
++        copy_file(args.config, save_dir)
+ 
+     if config["Model"]["align_method"] == "numba":
+         warmup_numba()

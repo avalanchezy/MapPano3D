@@ -1,0 +1,327 @@
+diff --git a/inference.py b/inference.py
+index ee02d52..86b7027 100644
+--- a/inference.py
++++ b/inference.py
+@@ -307,7 +307,8 @@ def run_inference(
+ #  7.  Main Pipeline
+ # =========================================================================
+ 
+-def main(args: argparse.Namespace) -> None:
++def main(args: argparse.Namespace, model: Optional[PanoVGGTModel] = None) -> None:
++    compact_output = os.environ.get("PANOVGGT_COMPACT_OUTPUT", "0") == "1"
+     # ── device ────────────────────────────────────────────────────────────
+     device = args.device
+     if device == "cuda" and not torch.cuda.is_available():
+@@ -332,9 +333,23 @@ def main(args: argparse.Namespace) -> None:
+         n_masks = sum(1 for m in mask_paths if m is not None)
+         print(f"[pipeline] {n_masks}/{S} mask(s) matched.")
+ 
++    sky_mask_paths = None
++    if args.mask_sky:
++        from panovggt.utils.skyseg import apply_sky_segmentation
++
++        sky_conf = np.ones((S, _INPUT_H, _INPUT_W), dtype=np.float32)
++        apply_sky_segmentation(sky_conf, args.image_dir)
++        sky_mask_dir = args.image_dir.rstrip("/") + "_sky_masks"
++        sky_mask_paths = collect_masks(sky_mask_dir, image_paths)
++        n_sky_masks = sum(1 for m in sky_mask_paths if m is not None)
++        print(f"[pipeline] {n_sky_masks}/{S} VGGT sky mask(s) ready.")
++
+     # ── model ─────────────────────────────────────────────────────────────
+-    model = load_model(args.config, args.checkpoint, device)
+-    model.eval().to(device)
++    if model is None:
++        model = load_model(args.config, args.checkpoint, device)
++        model.eval().to(device)
++    else:
++        print("[pipeline] Reusing loaded PanoVGGT model.")
+     print(f"[pipeline] Model ready on {device}.")
+     print(f"[pipeline] Fixed input resolution: H={_INPUT_H}, W={_INPUT_W}")
+ 
+@@ -381,6 +396,14 @@ def main(args: argparse.Namespace) -> None:
+     print(f"[pipeline] Inference frame size: {H} × {W}")
+ 
+     # ── per-frame processing ──────────────────────────────────────────────
++    confidence_valid = None
++    if args.conf_percent > 0 and world_pts_np is not None:
++        from panovggt.utils.basic import _confidence_valid_from_predictions
++
++        conf_preds = dict(preds)
++        conf_preds.setdefault("points", world_pts_np)
++        confidence_valid = _confidence_valid_from_predictions(conf_preds, args.conf_percent)
++
+     all_xyz: List[np.ndarray] = []
+     all_rgb: List[np.ndarray] = []
+ 
+@@ -407,19 +430,36 @@ def main(args: argparse.Namespace) -> None:
+         else:
+             print("  mask: (none — all pixels valid)")
+ 
++        if sky_mask_paths is not None and sky_mask_paths[i] is not None:
++            sky_valid = load_mask(sky_mask_paths[i], H, W)
++            if sky_valid is not None:
++                mask_valid = sky_valid if mask_valid is None else (mask_valid & sky_valid)
++                print(f"  sky mask: {sky_mask_paths[i]}  "
++                      f"valid={sky_valid.sum():,}/{H * W:,} px "
++                      f"({100.0 * sky_valid.mean():.1f} %)")
++        elif sky_mask_paths is not None:
++            print("  sky mask: (missing)")
++
+         # ── depth map ─────────────────────────────────────────────────────
++        if confidence_valid is not None:
++            conf_valid = confidence_valid[i]
++            mask_valid = conf_valid if mask_valid is None else (mask_valid & conf_valid)
++            print(f"  confidence: kept={conf_valid.sum():,}/{H * W:,} px "
++                  f"({100.0 * conf_valid.mean():.1f} %)")
++
+         if depth_np is not None:
+             d = depth_np[i]                                 # (H, W)
+ 
+-            # coloured visualisation
+-            colored = depth_to_colormap(
+-                d,
+-                valid_mask=mask_valid,
+-                use_log=args.log_depth,
+-                colormap=cv2.COLORMAP_TURBO,
+-            )
+             out_depth_path = os.path.join(depth_dir, f"{stem}_depth.png")
+-            cv2.imwrite(out_depth_path, colored)
++            if not compact_output:
++                # This preview is not used by reconstruction or evaluation.
++                colored = depth_to_colormap(
++                    d,
++                    valid_mask=mask_valid,
++                    use_log=args.log_depth,
++                    colormap=cv2.COLORMAP_TURBO,
++                )
++                cv2.imwrite(out_depth_path, colored)
+ 
+             # raw 16-bit depth (millimetres, masked invalid → 0)
+             d_mm = (d * 1000.0).astype(np.float32)
+@@ -429,7 +469,10 @@ def main(args: argparse.Namespace) -> None:
+             cv2.imwrite(
+                 os.path.join(depth_dir, f"{stem}_depth_raw.png"), d_u16
+             )
+-            print(f"  depth: saved → {out_depth_path}")
++            if compact_output:
++                print(f"  depth: raw depth saved for semantic subsetting")
++            else:
++                print(f"  depth: saved → {out_depth_path}")
+ 
+         # ── camera pose ───────────────────────────────────────────────────
+         if poses_np is not None:
+@@ -451,7 +494,7 @@ def main(args: argparse.Namespace) -> None:
+             print(f"  pose: R saved  t={t}")
+ 
+         # ── per-frame point cloud (local / camera frame) ──────────────────
+-        if local_pts_np is not None:
++        if local_pts_np is not None and not compact_output:
+             pts_hw3 = local_pts_np[i]                       # (H, W, 3)
+             xyz, rgb = points_and_colors_from_frame(
+                 pts_hw3, img_rgb, valid_mask=mask_valid
+@@ -506,6 +549,12 @@ def parse_args() -> argparse.Namespace:
+     p.add_argument("--mask_dir",    type=str, default=None,
+                    help="Directory containing masks (same stem as images). "
+                         "Black pixels = invalid. Omit to skip masking.")
++    p.add_argument("--mask_sky",    action="store_true",
++                   help="Apply VGGT sky segmentation to filter out sky points.")
++    p.add_argument("--conf_percent", type=float, default=0.0,
++                   help="Filter out the lowest-confidence percentage of points. "
++                        "Uses model confidence if present, otherwise global/local "
++                        "self-consistency. 0 disables confidence filtering.")
+     p.add_argument("--output_dir",  type=str, default="panovggt_output",
+                    help="Root output directory. (default: panovggt_output)")
+     p.add_argument("--device",      type=str, default="cuda",
+@@ -520,4 +569,4 @@ def parse_args() -> argparse.Namespace:
+ 
+ if __name__ == "__main__":
+     args = parse_args()
+-    main(args)
+\ No newline at end of file
++    main(args)
+diff --git a/panovggt/utils/basic.py b/panovggt/utils/basic.py
+index 0517247..f79665b 100644
+--- a/panovggt/utils/basic.py
++++ b/panovggt/utils/basic.py
+@@ -469,6 +469,105 @@ if __name__ == "__main__":
+ '''
+ 
+ 
++def _sky_valid_from_target_dir(points_shape: Tuple[int, int, int], target_dir: Optional[str]) -> np.ndarray:
++    if target_dir is None:
++        raise ValueError("target_dir is required when mask_sky=True")
++
++    image_dir = os.path.join(target_dir, "images")
++    if not os.path.isdir(image_dir):
++        raise ValueError(f"Image folder not found for sky segmentation: {image_dir}")
++
++    from .skyseg import apply_sky_segmentation
++
++    conf = np.ones(points_shape, dtype=np.float32)
++    conf = apply_sky_segmentation(conf, image_dir)
++    return conf > 1e-5
++
++
++_CONFIDENCE_KEYS = (
++    "conf",
++    "confidence",
++    "point_conf",
++    "points_conf",
++    "world_points_conf",
++    "depth_conf",
++)
++
++
++def _coerce_confidence_map(conf: np.ndarray, points_shape: Tuple[int, int, int]) -> Optional[np.ndarray]:
++    conf = np.asarray(conf)
++    if conf.ndim == 5 and conf.shape[0] == 1:
++        conf = conf[0]
++    if conf.ndim == 4 and conf.shape[-1] == 1:
++        conf = conf[..., 0]
++    if conf.ndim == 4 and conf.shape[1] == 1:
++        conf = conf[:, 0]
++    if conf.shape != points_shape:
++        return None
++    return conf.astype(np.float32, copy=False)
++
++
++def _confidence_from_predictions(
++    predictions: dict,
++    points: np.ndarray,
++) -> Tuple[Optional[np.ndarray], Optional[str]]:
++    points_shape = points.shape[:3]
++    for key in _CONFIDENCE_KEYS:
++        if key not in predictions or predictions[key] is None:
++            continue
++        conf = _coerce_confidence_map(predictions[key], points_shape)
++        if conf is not None:
++            return conf, key
++
++    global_points = predictions.get("global_points")
++    if global_points is None:
++        return None, None
++    global_points = np.asarray(global_points)
++    if global_points.shape != points.shape:
++        return None, None
++
++    err = np.linalg.norm(points - global_points, axis=-1)
++    finite = np.isfinite(err)
++    score = np.zeros(points_shape, dtype=np.float32)
++    if not finite.any():
++        return None, None
++
++    scale = float(np.percentile(err[finite], 95))
++    if scale <= 1e-8:
++        score[finite] = 1.0
++    else:
++        score[finite] = 1.0 - np.clip(err[finite] / scale, 0.0, 1.0)
++    return score, "global/local self-consistency"
++
++
++def _confidence_valid_from_predictions(
++    predictions: dict,
++    conf_percent: float,
++) -> Optional[np.ndarray]:
++    if conf_percent is None or conf_percent <= 0:
++        return None
++
++    points = predictions["points"]
++    conf, source = _confidence_from_predictions(predictions, points)
++    if conf is None:
++        print("[confidence] No confidence-like prediction found; skipping confidence filtering.")
++        return None
++
++    finite = np.isfinite(conf)
++    if not finite.any():
++        print("[confidence] Confidence map is empty/invalid; skipping confidence filtering.")
++        return None
++
++    percent = float(np.clip(conf_percent, 0.0, 100.0))
++    threshold = float(np.percentile(conf[finite], percent))
++    valid = finite & (conf >= threshold)
++    print(
++        f"[confidence] Using {source}; filtering lowest {percent:.1f}% "
++        f"(threshold={threshold:.6g}, kept={valid.sum():,}/{valid.size:,})."
++    )
++    return valid
++
++
+ def save_pointcloud_and_cameras(
+     predictions: dict,
+     save_dir: str,
+@@ -476,6 +575,9 @@ def save_pointcloud_and_cameras(
+     include_colors: bool = True,
+     save_separate: bool = True,
+     save_combined: bool = True,
++    mask_sky: bool = False,
++    target_dir: Optional[str] = None,
++    conf_percent: float = 0.0,
+ ) -> Dict[str, str]:
+     """Export point cloud + camera frustums as PLY files.
+ 
+@@ -487,7 +589,8 @@ def save_pointcloud_and_cameras(
+     os.makedirs(save_dir, exist_ok=True)
+     saved: Dict[str, str] = {}
+ 
+-    pts = predictions["points"].reshape(-1, 3)
++    points = predictions["points"]
++    pts = points.reshape(-1, 3)
+     images = predictions["images"]
+     poses = predictions["camera_poses"]
+ 
+@@ -501,6 +604,12 @@ def save_pointcloud_and_cameras(
+ 
+     # keep only finite points
+     mask = np.isfinite(pts).all(axis=1)
++    confidence_valid = _confidence_valid_from_predictions(predictions, conf_percent)
++    if confidence_valid is not None:
++        mask &= confidence_valid.reshape(-1)
++    if mask_sky:
++        sky_valid = _sky_valid_from_target_dir(points.shape[:3], target_dir)
++        mask &= sky_valid.reshape(-1)
+     pts, colours = pts[mask], colours[mask]
+ 
+     # scene scale → camera frustum sizing
+@@ -654,6 +763,9 @@ def predictions_to_glb(
+     predictions: dict,
+     filter_by_frames: str = "All",
+     show_cam: bool = True,
++    mask_sky: bool = False,
++    target_dir: Optional[str] = None,
++    conf_percent: float = 0.0,
+ ) -> trimesh.Scene:
+     """Build a ``trimesh.Scene`` from model predictions (exportable as GLB).
+ 
+@@ -669,13 +781,25 @@ def predictions_to_glb(
+     pts = predictions["points"]
+     images = predictions["images"]
+     poses = predictions["camera_poses"]
++    sky_valid = None
++    if mask_sky:
++        sky_valid = _sky_valid_from_target_dir(pts.shape[:3], target_dir)
++    confidence_valid = _confidence_valid_from_predictions(predictions, conf_percent)
+ 
+     if sel is not None:
+         pts, images, poses = pts[sel:sel+1], images[sel:sel+1], poses[sel:sel+1]
++        if sky_valid is not None:
++            sky_valid = sky_valid[sel:sel+1]
++        if confidence_valid is not None:
++            confidence_valid = confidence_valid[sel:sel+1]
+ 
+     verts = pts.reshape(-1, 3)
+     rgb = (images.reshape(-1, 3) * 255).astype(np.uint8)
+     valid = np.isfinite(verts).all(axis=1)
++    if confidence_valid is not None:
++        valid &= confidence_valid.reshape(-1)
++    if sky_valid is not None:
++        valid &= sky_valid.reshape(-1)
+     verts, rgb = verts[valid], rgb[valid]
+ 
+     if verts.size == 0:
+@@ -696,4 +820,4 @@ def predictions_to_glb(
+     rot[:3, :3] = (Rotation.from_euler("y", 100, degrees=True).as_matrix()
+                    @ Rotation.from_euler("x", 155, degrees=True).as_matrix())
+     scene.apply_transform(rot)
+-    return scene
+\ No newline at end of file
++    return scene

@@ -1,0 +1,180 @@
+diff --git a/base_models/base_model.py b/base_models/base_model.py
+index c27d948..a630a06 100644
+--- a/base_models/base_model.py
++++ b/base_models/base_model.py
+@@ -22,8 +22,8 @@ class Base3DModel(ABC):
+         """
+         self.config = config
+         self.device = device
+-        # Automatically select bfloat16 for newer GPUs (SM >= 8), otherwise use float16.
+-        self.dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
++        # Automatically select bfloat16 for newer GPUs (SM >= 8), otherwise use float16.
++        self.dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+         self.model = None
+         self.k = None
+         self.update = True
+diff --git a/vggt_long.py b/vggt_long.py
+index 52fbca5..f25f3a0 100644
+--- a/vggt_long.py
++++ b/vggt_long.py
+@@ -82,6 +82,20 @@ def extract_p2_k_matrix(calib_path):
+ 
+     raise ValueError("P2 not found in calibration file")
+ 
++
++def load_precomputed_loop_pairs(loop_file):
++    loop_pairs = []
++    with open(loop_file, "r", encoding="utf-8") as f:
++        for line in f:
++            line = line.strip()
++            if not line or line.startswith("#"):
++                continue
++            parts = [p.strip() for p in line.split(",")]
++            if len(parts) < 2:
++                continue
++            loop_pairs.append((int(parts[0]), int(parts[1])))
++    return loop_pairs
++
+ class LongSeqResult:
+     def __init__(self):
+         self.combined_extrinsics = []
+@@ -122,6 +136,8 @@ class VGGT_Long:
+         self.all_camera_intrinsics = [] 
+         
+         self.delete_temp_files = self.config['Model']['delete_temp_files']
++        self.resume_existing = bool(self.config['Model'].get('resume_existing', False))
++        self.max_loop_pairs = self.config['Model'].get('max_loop_pairs', None)
+ 
+         if self.config['Weights']['model'] == 'VGGT':
+             self.model = VGGTAdapter(self.config)
+@@ -147,11 +163,12 @@ class VGGT_Long:
+         self.loop_predict_list = []
+ 
+         self.loop_enable = self.config['Model']['loop_enable']
++        self.precomputed_loop_file = self.config.get('Loop', {}).get('precomputed_loop_file', None)
+ 
+         if self.loop_enable:
+             if self.useDBoW:
+                 self.retrieval = RetrievalDBOW(config=self.config)
+-            else:
++            elif self.precomputed_loop_file is None:
+                 loop_info_save_path = os.path.join(save_dir, "loop_closures.txt")
+                 self.loop_detector = LoopDetector(
+                     image_dir=image_dir,
+@@ -162,6 +179,12 @@ class VGGT_Long:
+         print('init done.')
+ 
+     def get_loop_pairs(self):
++        if self.precomputed_loop_file is not None:
++            if not os.path.exists(self.precomputed_loop_file):
++                raise FileNotFoundError(f"Precomputed loop file not found: {self.precomputed_loop_file}")
++            self.loop_list = load_precomputed_loop_pairs(self.precomputed_loop_file)
++            print(f"Loaded {len(self.loop_list)} precomputed loop pairs from {self.precomputed_loop_file}")
++            return
+ 
+         if self.useDBoW: # DBoW2
+             for frame_id, img_path in tqdm(enumerate(self.img_list)):
+@@ -195,11 +218,6 @@ class VGGT_Long:
+             start_idx, end_idx = range_2
+             chunk_image_paths += self.img_list[start_idx:end_idx]
+ 
+-        predictions = self.model.infer_chunk(chunk_image_paths)
+-        for key in predictions.keys():
+-            if isinstance(predictions[key], torch.Tensor):
+-                predictions[key] = predictions[key].cpu().numpy().squeeze(0)
+-        
+         # Save predictions to disk instead of keeping in memory
+         if is_loop:
+             save_dir = self.result_loop_dir
+@@ -211,7 +229,21 @@ class VGGT_Long:
+             filename = f"chunk_{chunk_idx}.npy"
+         
+         save_path = os.path.join(save_dir, filename)
+-                    
++        if self.resume_existing and os.path.exists(save_path):
++            predictions = np.load(save_path, allow_pickle=True).item()
++            if not is_loop and range_2 is None:
++                extrinsics = predictions['extrinsic']
++                intrinsics = predictions['intrinsic']
++                chunk_range = self.chunk_indices[chunk_idx]
++                self.all_camera_poses.append((chunk_range, extrinsics))
++                self.all_camera_intrinsics.append((chunk_range, intrinsics))
++            return predictions if is_loop or range_2 is not None else None
++
++        predictions = self.model.infer_chunk(chunk_image_paths)
++        for key in predictions.keys():
++            if isinstance(predictions[key], torch.Tensor):
++                predictions[key] = predictions[key].cpu().numpy().squeeze(0)
++
+         if not is_loop and range_2 is None:
+             extrinsics = predictions['extrinsic']
+             intrinsics = predictions['intrinsic']
+@@ -252,6 +284,9 @@ class VGGT_Long:
+                                              self.loop_list,
+                                              half_window = int(self.config['Model']['loop_chunk_size'] / 2))
+             loop_results = remove_duplicates(loop_results)
++            if self.max_loop_pairs is not None and int(self.max_loop_pairs) > 0:
++                loop_results = loop_results[: int(self.max_loop_pairs)]
++                print(f"Using first {len(loop_results)} loop pairs after max_loop_pairs cap.")
+             print(loop_results)
+             # return e.g. (31, (1574, 1594), 2, (129, 149))
+             for item in loop_results:
+@@ -488,8 +523,12 @@ class VGGT_Long:
+                 self.retrieval.close()  # Save CPU Memory
+                 gc.collect()
+             else:
+-                del self.loop_detector  # Save GPU Memory
++                if hasattr(self, 'loop_detector'):
++                    del self.loop_detector  # Save GPU Memory
++                    gc.collect()
+         torch.cuda.empty_cache()
++        if torch.cuda.is_available():
++            torch.cuda.ipc_collect()
+         print('Loading model...')
+         self.model.load()
+ 
+@@ -658,18 +697,22 @@ if __name__ == '__main__':
+                         help='Image path')
+     parser.add_argument('--config', type=str, required=False, default='./configs/base_config.yaml',
+                         help='config path')
++    parser.add_argument('--save_dir', type=str, default=None,
++                        help='existing or explicit experiment directory')
+     args = parser.parse_args()
+ 
+     config = load_config(args.config)
+ 
+     image_dir = args.image_dir
+     path = image_dir.split("/")
+-    current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+     exp_dir = './exps'
+-
+-    save_dir = os.path.join(
+-            exp_dir, image_dir.replace("/", "_"), current_datetime
+-        )
++    if args.save_dir is not None:
++        save_dir = args.save_dir
++    else:
++        current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
++        save_dir = os.path.join(
++                exp_dir, image_dir.replace("/", "_"), current_datetime
++            )
+     
+     # save_dir = os.path.join(
+     #     exp_dir, path[-3] + "_" + path[-2] + "_" + path[-1], current_datetime
+@@ -679,6 +722,9 @@ if __name__ == '__main__':
+         os.makedirs(save_dir)
+         print(f'The exp will be saved under dir: {save_dir}')
+         copy_file(args.config, save_dir)
++    elif args.save_dir is not None:
++        print(f'The exp will resume under dir: {save_dir}')
++        copy_file(args.config, save_dir)
+ 
+     if config['Model']['align_method'] == 'numba':
+         warmup_numba()
+@@ -696,4 +742,4 @@ if __name__ == '__main__':
+     print("Saving all the point clouds")
+     merge_ply_files(input_dir, all_ply_path)
+     print('All done.')
+-    sys.exit()
+\ No newline at end of file
++    sys.exit()

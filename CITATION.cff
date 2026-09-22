@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "Please cite our ACCV 2026 paper when using MapPano3D."
+title: "MapPano3D: Map-Guided Large-Scale Urban Reconstruction from Panoramic Videos"
+type: software
+authors:
+  - family-names: Zhu
+    given-names: Yi
+  - family-names: Aizawa
+    given-names: Kiyoharu
+  - family-names: Valette
+    given-names: Sebastien
+  - family-names: Ikehata
+    given-names: Satoshi
+repository-code: "https://github.com/avalanchezy/MapPano3D"
+license: MIT
+date-released: 2026-09-22

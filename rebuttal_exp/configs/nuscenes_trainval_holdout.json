@@ -1,0 +1,121 @@
+{
+  "protocol": "Frozen-after-mini controlled nuScenes trainval LiDAR geometry study",
+  "frozen_before_lidar_evaluation": true,
+  "development_tuning": "nuScenes v1.0-mini only; the 1.5 m translation cap and all other thresholds were frozen before any v1.0-trainval LiDAR scoring",
+  "method_hyperparameters": {
+    "score_corridor_m": 15.0,
+    "max_input_anchor_rmse_m": 1.5,
+    "max_backbone_points": 1500,
+    "max_refine_translation_m": 1.5,
+    "anchor_slack_m": 4.5,
+    "anchor_weight": 0.05,
+    "skeleton_weight": 1.0,
+    "min_objective_improvement": 0.01,
+    "rigid_refinement": true
+  },
+  "selection_rule": "Two non-mini scenes from each nuScenes location, selected from metadata descriptions before any trainval LiDAR scoring; all eight scenes are evaluated and reported.",
+  "scenes": [
+    {
+      "name": "scene-0002",
+      "location": "singapore-onenorth",
+      "reason": "intersection",
+      "set": "primary"
+    },
+    {
+      "name": "scene-0065",
+      "location": "boston-seaport",
+      "reason": "intersection and right turn",
+      "set": "primary"
+    },
+    {
+      "name": "scene-0182",
+      "location": "singapore-queenstown",
+      "reason": "narrow sloped road",
+      "set": "primary"
+    },
+    {
+      "name": "scene-0399",
+      "location": "singapore-hollandvillage",
+      "reason": "large intersection",
+      "set": "primary"
+    },
+    {
+      "name": "scene-0007",
+      "location": "singapore-onenorth",
+      "reason": "left turn",
+      "set": "extension"
+    },
+    {
+      "name": "scene-0068",
+      "location": "boston-seaport",
+      "reason": "left turn",
+      "set": "extension"
+    },
+    {
+      "name": "scene-0181",
+      "location": "singapore-queenstown",
+      "reason": "left turn",
+      "set": "extension"
+    },
+    {
+      "name": "scene-0405",
+      "location": "singapore-hollandvillage",
+      "reason": "residential cross intersection",
+      "set": "extension"
+    }
+  ],
+  "primary_evaluation_levels": [
+    "clean",
+    "rigid_medium"
+  ],
+  "robustness_extension_levels": [
+    "rigid_mild",
+    "rigid_severe",
+    "scale_mild",
+    "scale_medium",
+    "scale_severe"
+  ],
+  "extension_policy": "All five levels were declared in this config before primary trainval LiDAR scoring. They are reported together with the primary levels without changing method hyperparameters or selecting a favorable level.",
+  "perturbations": {
+    "rigid_mild": {
+      "yaw_deg": 2.0,
+      "horizontal_translation_m": 0.5,
+      "seeds": 10
+    },
+    "rigid_medium": {
+      "yaw_deg": 5.0,
+      "horizontal_translation_m": 1.0,
+      "seeds": 10
+    },
+    "rigid_severe": {
+      "yaw_deg": 10.0,
+      "horizontal_translation_m": 2.0,
+      "seeds": 10
+    },
+    "scale_mild": {
+      "scale_fraction": 0.02,
+      "seeds": 10
+    },
+    "scale_medium": {
+      "scale_fraction": 0.05,
+      "seeds": 10
+    },
+    "scale_severe": {
+      "scale_fraction": 0.1,
+      "seeds": 10
+    }
+  },
+  "data_usage": {
+    "method_inputs": [
+      "camera panoramas",
+      "nuScenes semantic road map",
+      "GT-derived ego-pose anchors, fixed or deterministically perturbed"
+    ],
+    "evaluation_only": [
+      "LIDAR_TOP keyframes",
+      "3D annotations for dynamic-object filtering",
+      "unperturbed ego poses for recovery metrics"
+    ],
+    "claim_boundary": "Controlled map-refinement geometry and robustness under strong anchors; not independent pose generalization"
+  }
+}

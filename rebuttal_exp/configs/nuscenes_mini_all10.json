@@ -1,0 +1,121 @@
+{
+  "protocol": "nuScenes v1.0-mini exhaustive ten-scene LiDAR point-cloud quality study",
+  "scene_policy": "Evaluate and report every scene in v1.0-mini; no motion-based scene exclusion.",
+  "role": "Exhaustive development-set diagnostic. The separate non-mini trainval study remains the held-out confirmation.",
+  "method_hyperparameters": {
+    "score_corridor_m": 15.0,
+    "max_input_anchor_rmse_m": 1.5,
+    "max_backbone_points": 1500,
+    "max_refine_translation_m": 1.5,
+    "anchor_slack_m": 4.5,
+    "anchor_weight": 0.05,
+    "skeleton_weight": 1.0,
+    "min_objective_improvement": 0.01,
+    "rigid_refinement": true
+  },
+  "scenes": [
+    {
+      "name": "scene-0061",
+      "location": "singapore-onenorth",
+      "motion_group": "moving"
+    },
+    {
+      "name": "scene-0103",
+      "location": "boston-seaport",
+      "motion_group": "moving"
+    },
+    {
+      "name": "scene-0553",
+      "location": "boston-seaport",
+      "motion_group": "near_stationary"
+    },
+    {
+      "name": "scene-0655",
+      "location": "boston-seaport",
+      "motion_group": "moving"
+    },
+    {
+      "name": "scene-0757",
+      "location": "boston-seaport",
+      "motion_group": "moving"
+    },
+    {
+      "name": "scene-0796",
+      "location": "singapore-queenstown",
+      "motion_group": "moving"
+    },
+    {
+      "name": "scene-0916",
+      "location": "singapore-queenstown",
+      "motion_group": "moving"
+    },
+    {
+      "name": "scene-1077",
+      "location": "singapore-hollandvillage",
+      "motion_group": "moving"
+    },
+    {
+      "name": "scene-1094",
+      "location": "singapore-hollandvillage",
+      "motion_group": "moving"
+    },
+    {
+      "name": "scene-1100",
+      "location": "singapore-hollandvillage",
+      "motion_group": "low_motion"
+    }
+  ],
+  "primary_evaluation_levels": [
+    "clean",
+    "rigid_medium"
+  ],
+  "robustness_extension_levels": [
+    "rigid_mild",
+    "rigid_severe",
+    "scale_mild",
+    "scale_medium",
+    "scale_severe"
+  ],
+  "perturbations": {
+    "rigid_mild": {
+      "yaw_deg": 2.0,
+      "horizontal_translation_m": 0.5,
+      "seeds": 10
+    },
+    "rigid_medium": {
+      "yaw_deg": 5.0,
+      "horizontal_translation_m": 1.0,
+      "seeds": 10
+    },
+    "rigid_severe": {
+      "yaw_deg": 10.0,
+      "horizontal_translation_m": 2.0,
+      "seeds": 10
+    },
+    "scale_mild": {
+      "scale_fraction": 0.02,
+      "seeds": 10
+    },
+    "scale_medium": {
+      "scale_fraction": 0.05,
+      "seeds": 10
+    },
+    "scale_severe": {
+      "scale_fraction": 0.1,
+      "seeds": 10
+    }
+  },
+  "data_usage": {
+    "method_inputs": [
+      "six-camera cylindrical panoramas",
+      "nuScenes semantic road map",
+      "GT-derived ego-pose anchors, fixed or deterministically perturbed"
+    ],
+    "evaluation_only": [
+      "LIDAR_TOP keyframes",
+      "3D annotations for dynamic-object filtering",
+      "unperturbed ego poses for recovery diagnostics"
+    ],
+    "claim_boundary": "Independent LiDAR geometry under controlled anchors; not an independent localization benchmark"
+  }
+}
