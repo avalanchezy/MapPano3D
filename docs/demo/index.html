@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore a real MapPano3D reconstruction in an interactive point-cloud walkthrough.">
+  <title>MapPano3D | Interactive Demo</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="viewer.css">
+  <script type="importmap">{"imports":{"three":"./three.module.min.js"}}</script>
+  <script src="lucide.min.js" defer></script>
+  <script type="module" src="viewer.js"></script>
+</head>
+<body>
+  <header>
+    <div class="identity"><h1>MapPano3D</h1><span>Interactive reconstruction</span></div>
+    <a class="icon" href="https://github.com/avalanchezy/MapPano3D" aria-label="Source code" title="Source code"><i data-lucide="github"></i></a>
+  </header>
+  <main>
+    <section id="stage" aria-label="Reconstructed scene">
+      <canvas id="cloud" aria-label="Interactive colored point cloud"></canvas>
+      <div class="view-toolbar">
+        <div class="segmented" aria-label="Camera mode">
+          <button id="walk" aria-pressed="false">Walkthrough</button>
+          <button id="overview" class="selected" aria-pressed="true">Overview</button>
+        </div>
+        <button id="reset" class="icon" title="Reset view" aria-label="Reset view"><i data-lucide="rotate-ccw"></i></button>
+      </div>
+      <div class="point-status"><span class="dot"></span>Full static scene <span id="point-count"></span></div>
+      <div id="loading" role="status">Loading reconstruction...</div>
+    </section>
+    <aside>
+      <section class="map-section"><h2>Route</h2><canvas id="map" aria-label="Map with current playback position"></canvas></section>
+      <section class="panorama-section"><h2>Panoramic input</h2><canvas id="panorama" width="1024" height="512" aria-label="Panoramic video frame"></canvas></section>
+      <section class="adjustments">
+        <label for="point-size">Point size</label><input id="point-size" type="range" min="1" max="5" value="3" step="0.5">
+        <label for="speed">Playback</label><select id="speed"><option value="8">0.5x</option><option value="16" selected>1x</option><option value="32">2x</option></select>
+      </section>
+      <p class="attribution">MovieMap imagery &middot; GSI map<br><a href="https://moviemap.jp/">MovieMap</a> / <a href="https://maps.gsi.go.jp/">GSI</a></p>
+    </aside>
+  </main>
+  <footer>
+    <button id="play" class="icon primary" title="Play" aria-label="Play" disabled><i data-lucide="play"></i></button>
+    <input id="timeline" aria-label="Playback position" type="range" min="0" max="1" step="1" value="0" disabled>
+    <output id="progress">0 / 0</output>
+    <button id="fullscreen" class="icon" title="Full screen" aria-label="Full screen"><i data-lucide="maximize"></i></button>
+  </footer>
+</body>
+</html>
