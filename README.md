@@ -8,8 +8,8 @@ Yi Zhu, Kiyoharu Aizawa, Sebastien Valette, Satoshi Ikehata
 MapPano3D is a **training-free, backbone-agnostic** framework for assembling
 feed-forward local geometry into urban-scale reconstructions. Camera anchors
 initialize placement, road topology selects local map support, and semantic
-road evidence drives upright BEV registration. The accepted transform is
-applied to the **full static scene**, not only to road points.
+road evidence drives upright BEV registration. The accepted transform aligns
+the **full static scene**, including buildings, vegetation, and sidewalks.
 
 ![MapPano3D framework](assets/pipeline.png)
 
@@ -18,11 +18,12 @@ integration interfaces**. Registration consumes point maps, camera poses,
 semantic associations, and coordinate conventions rather than a specific
 neural architecture; see [the backbone interface](docs/backbones.md).
 
-The complete reproduction workflow is **VGGT + nuScenes-mini**, including
-all ten scenes and independent LiDAR evaluation. Pi3X and PanoVGGT expose
-extension hooks and input specifications, not additional turnkey tutorials.
-The paper's backbone experiments use VGGT and PanoVGGT; the Pi3X hook is an
-integration interface, not a reported MapPano3D-Pi3X experiment.
+- **Training-free:** use frozen pretrained geometry models with geometric
+  map refinement and full-scene fusion.
+- **Reusable across backbones:** connect VGGT, Pi3X, or PanoVGGT through
+  shared point-map and camera interfaces.
+- **Reproducible evaluation:** follow the complete **VGGT + nuScenes-mini**
+  workflow across all ten scenes, from images to independent LiDAR metrics.
 
 ## Getting Started
 
@@ -39,8 +40,8 @@ pretrained weights, and a suitable GPU. Mask2Former inference requires its
 Detectron2 environment. Install those dependencies using their upstream
 instructions; geometry post-processing can run on CPU.
 
-**[VGGT + nuScenes reproduction](docs/reproduction.md)** is the single
-end-to-end guide: data preparation, semantic masks, VGGT predictions,
+**[VGGT + nuScenes reproduction](docs/reproduction.md)** covers
+data preparation, semantic masks, VGGT predictions,
 map refinement, full-static fusion, and all-scene geometry evaluation.
 For other predictors or your own 360-degree recordings, use the
 [backbone contract](docs/backbones.md) and
@@ -56,30 +57,27 @@ For other predictors or your own 360-degree recordings, use the
 | `rebuttal_exp/configs/` | Experiment configurations, including the 40-image/20-overlap VGGT setting |
 | `patches/` | Export/inference changes for the pinned upstream backbone repositories |
 
-MovieMap videos and metadata are not distributed. In particular, the release
-does not include route manifests, trajectories, frame-to-map associations,
-calibration, map graphs/masks, or private experiment configurations for the
-Hokkaido and Kanazawa areas. The paper illustration is retained for presentation.
-Create your own 360-degree recordings and associated map/anchor inputs; the
-public interface does not download or reconstruct the private dataset metadata.
-Model weights, reconstruction caches, and review material are also excluded.
-
 ## Evaluation
 
-- **MovieMap (Hokkaido and Kanazawa):** the paper evaluates panoramic urban
-  reconstruction in two areas. This release exposes the input interface for
-  user-created video data, not those areas' metadata or experiment loaders.
+- **MovieMap (Hokkaido and Kanazawa):** panoramic reconstruction and road-map
+  consistency across two urban areas using PanoVGGT.
 - **nuScenes-mini:** all ten scenes; matched six-camera inputs and 40 total
   camera images per chunk, with 20-image overlap; all-static and non-ground
   LiDAR accuracy, completeness, Chamfer-L1, precision, recall, and F1.
 
-LiDAR is an evaluation reference, not an input to local BEV optimization.
-The nuScenes comparison uses one shared upright alignment from the
-pre-refinement VGGT camera trajectory to the dataset's ground-truth camera
-trajectory. Both methods reuse the same predictions and static filtering;
-there is no method-specific global re-fitting. Mini evaluation informed the
-development of acceptance settings. Map-fit and LiDAR metrics measure
-different properties and are reported separately.
+The nuScenes comparison shares VGGT predictions, static filtering, and one
+fixed alignment to the ground-truth camera trajectory. Map consistency and
+LiDAR geometry are reported separately. See the
+[evaluation protocol](docs/reproduction.md#5-lidar-evaluation-and-ten-scene-summary)
+for alignment, filtering, metrics, and development settings.
+
+## Data
+
+For panoramic inputs, use your own 360-degree recordings with map support
+and camera anchors; see the [input specification](docs/custom_360_inputs.md).
+MovieMap route, pose, calibration, and frame-association metadata remain
+private. Paper figures and demonstration videos can be shared as visual
+results. Obtain nuScenes and pretrained weights from their original providers.
 
 ## Citation
 

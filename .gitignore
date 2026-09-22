@@ -31,3 +31,7 @@ checkpoints/
 *.mp4
 *.mov
 *.avi
+
+# Curated presentation videos.
+!assets/demos/*.mp4
+!assets/demos/*.webm

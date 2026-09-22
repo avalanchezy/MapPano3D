@@ -1,7 +1,8 @@
 # VGGT + nuScenes: Complete Workflow
 
-This is the release's single end-to-end guide. Commands use Bash (Linux or
-WSL), from the MapPano3D root unless stated otherwise. Keep separate upstream
+Reconstruct and evaluate all ten nuScenes-mini scenes with VGGT and
+MapPano3D. Commands use Bash (Linux or WSL), from the MapPano3D root unless
+stated otherwise. Keep separate upstream
 environments for VGGT-Long and Mask2Former/Detectron2; the geometry/evaluation
 environment uses `requirements.txt`. Switch to the named environment before
 each inference step, retaining the shell variables below.
@@ -168,7 +169,7 @@ Reuse steps 1-3 and the same chunk caches. Run the global refiner with
 still uses the same semantic-road sample; only optimization evidence changes.
 Compare initialization, ground-BEV, and road-BEV within this fixed protocol.
 
-Pi3X and PanoVGGT are documented in the [interface reference](backbones.md),
-not as additional end-to-end workflows. Unit tests exercise contracts and
-geometry helpers; they do not run pretrained networks or reproduce experimental
-scores. Full reproduction requires the actual nuScenes data, weights, and GPU.
+The [interface reference](backbones.md) describes Pi3X and PanoVGGT
+integration through the same geometry contract. Run `python -m pytest`
+to check interfaces and geometry helpers; the steps above run the models
+and evaluate reconstructed scenes.

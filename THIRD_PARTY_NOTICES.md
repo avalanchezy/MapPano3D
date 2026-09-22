@@ -21,10 +21,7 @@ with those snapshots are retained in `third_party_licenses/VGGT.txt` and
 remain subject to those terms, not the root MIT license. Install checkpoints
 from their original providers and observe their separate conditions.
 
-MovieMap videos and metadata, including the Hokkaido and Kanazawa route,
-trajectory, calibration, map, and frame-association files, are not redistributed.
-Users must create their own 360-degree video and corresponding inputs for the
-panoramic interface. The framework illustration, including example data views,
-is supplied only for documenting this research project, not as a dataset.
-nuScenes data and external map layers must be obtained separately under their
-providers' terms. The MIT license covers code, not dataset imagery or metadata.
+Paper illustrations and demonstration videos contain research-result views
+and dataset imagery. These visual assets retain their source attribution
+and respective rights; the root MIT license applies to code. nuScenes data
+and external map layers are obtained from their providers under their terms.

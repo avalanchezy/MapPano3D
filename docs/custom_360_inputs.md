@@ -1,10 +1,8 @@
 # Custom Panoramic Input Specification
 
-This is an extension interface, not a dataset loader or a second tutorial.
-Users create their own 360-degree recordings and supply camera anchors and
-map support. MovieMap videos, routes, trajectories, calibration, map assets,
-and frame associations are not included or reconstructed by this interface.
-Paper illustrations are presentation assets, not a sample dataset.
+Connect your own 360-degree recordings to MapPano3D by supplying local
+geometry, camera anchors, and road-map support. The specifications below
+describe the files consumed by the panoramic registration and fusion tools.
 
 ## Geometry
 
@@ -48,6 +46,5 @@ The adapter's acceptance rule produces `selected_chunk_summary.csv` with
 map/anchor evidence, not evaluation ground truth. `export_bev_2d_refined_ply.py`
 applies selected horizontal updates to the full static cloud.
 
-This specification contains no private routes, geographic coordinates,
-threshold presets, or model-inference tutorial. Use the
-[VGGT + nuScenes guide](reproduction.md) for the complete public workflow.
+For a complete image-to-reconstruction example, follow the
+[VGGT + nuScenes guide](reproduction.md).

@@ -1,20 +1,19 @@
 # Feed-Forward Backbone Interfaces
 
 MapPano3D separates neural geometry prediction from map registration. The
-common API in `mappano3d/backbones.py` reserves three named entry points:
+common API in `mappano3d/backbones.py` provides three named entry points:
 
 | Entry point | Role | Released workflow |
 | --- | --- | --- |
 | `VGGTAdapter` | Perspective point-map integration hook | Complete VGGT-Long + nuScenes guide |
-| `Pi3XAdapter` | Pi3X output-conversion hook | Interface only |
-| `PanoVGGTAdapter` | Equirectangular point-map integration hook | Interface only |
+| `Pi3XAdapter` | Pi3X output-conversion hook | Shared `GeometryChunk` interface |
+| `PanoVGGTAdapter` | Equirectangular point-map integration hook | Shared `GeometryChunk` interface and export patches |
 
 Each hook takes a `predict_and_convert(images, frame_ids)` callback that
 invokes an upstream frozen model or reads cached outputs, then returns
 `GeometryChunk`. The callback owns model-specific tensor keys, camera
-conversion, image resizing, and conversion to NumPy. No training or learned
-registration component is introduced. Different upstream output formats
-are normalized explicitly rather than inferred from the model name.
+conversion, image resizing, and conversion to NumPy. This connects upstream
+geometry to the same training-free registration and fusion stages.
 
 ## Shared Data Contract
 
@@ -41,8 +40,8 @@ and `excluded_ids`. Buildings and vegetation remain in the static cloud.
 Invalid/nonfinite points are omitted from both sets.
 
 The map adapter aligns geometry to camera anchors and map coordinates, then
-passes road evidence and static geometry separately to the refiner. Road
-extraction is not full-scene reconstruction.
+passes road evidence and static geometry separately to the refiner. Accepted
+road-guided transforms align the complete static scene.
 
 ## Existing VGGT-Long Export Adapter
 
@@ -61,11 +60,11 @@ The fixed-scale VGGT update changes X/Y and preserves Z.
 | VGGT-Long | `c160869d1d99c96bb227f414afb3bc68c29c9a76` | `patches/vggt-long-export.patch` |
 | PanoVGGT-Long | `0dfabf91ef4d6853aa4cad0aaf5011ba09a2e29b` | `patches/panovggt-long-export.patch` |
 
-The patches preserve export information without changing neural weights.
-Pi3X output conversion is supplied by the integrator; no Pi3X implementation
-or weights are bundled. The paper evaluates MapPano3D with VGGT and PanoVGGT,
-not with the Pi3X extension hook.
+The patches preserve export information with neural weights frozen. Supply
+a Pi3X output-conversion callback to connect its predictions to the shared
+interface. The paper's experiments instantiate the framework with VGGT
+and PanoVGGT.
 
-The only end-to-end instructions are [VGGT + nuScenes](reproduction.md).
-The [custom-data specification](custom_360_inputs.md) defines panoramic
-map/anchor inputs without publishing MovieMap metadata.
+Follow [VGGT + nuScenes](reproduction.md) for the complete workflow, or use
+the [custom-data specification](custom_360_inputs.md) to prepare panoramic
+map and anchor inputs.
