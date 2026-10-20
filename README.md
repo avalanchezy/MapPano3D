@@ -93,11 +93,12 @@ original providers.
 ## Citation
 
 ```bibtex
-@inproceedings{zhu2026mappano3d,
-  title={MapPano3D: Map-Guided Large-Scale Urban Reconstruction from Panoramic Videos},
-  author={Zhu, Yi and Aizawa, Kiyoharu and Valette, Sebastien and Ikehata, Satoshi},
-  booktitle={Asian Conference on Computer Vision (ACCV)},
-  year={2026}
+@inproceedings{zhu2026mappanod,
+title={MapPano3D: Map-Guided Large-Scale Urban Reconstruction from Panoramic Videos},
+author={Yi Zhu and Kiyoharu Aizawa and Sebastien Valette and Satoshi Ikehata},
+booktitle={Eighteenth Asian Conference on Computer Vision},
+year={2026},
+url={https://openreview.net/forum?id=3CrSfvMi5B}
 }
 ```
 
