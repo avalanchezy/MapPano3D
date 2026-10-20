@@ -1,7 +1,7 @@
 # MapPano3D
 
-**Map-Guided Large-Scale Urban Reconstruction from Panoramic Videos**  
-[ACCV 2026](https://hal.science/hal-05774047)
+[**Map-Guided Large-Scale Urban Reconstruction from Panoramic Videos**](https://hal.science/hal-05774047)
+ACCV 2026
 
 Yi Zhu, Kiyoharu Aizawa, Sebastien Valette, Satoshi Ikehata
 
